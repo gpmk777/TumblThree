@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.IO;
@@ -9,6 +10,7 @@ using System.Web;
 
 using TumblThree.Applications.Extensions;
 using TumblThree.Applications.Properties;
+using TumblThree.Domain;
 
 namespace TumblThree.Applications.Services
 {
@@ -124,6 +126,15 @@ namespace TumblThree.Applications.Services
             return (response.StatusCode == HttpStatusCode.OK);
         }
 
+        private void LogCookies(HttpWebResponse response, string type)
+        {
+            Logger.Verbose("Cookies {0}", type);
+            foreach (Cookie cookie in response.Cookies)
+            {
+                Logger.Verbose("  {0}{1}: {2}: {3}", cookie.Domain, cookie.Path, cookie.Name, cookie.Value);
+            }
+        }
+
         public async Task<string> ReadRequestToEndAsync(HttpWebRequest request, bool storeCookies = false)
         {
             using (var response = await request.GetResponseAsync().TimeoutAfter(shellService.Settings.TimeOut) as HttpWebResponse)
@@ -132,6 +143,7 @@ namespace TumblThree.Applications.Services
                 {
                     cookieService.SetUriCookie(response.Cookies);
                 }
+                LogCookies(response, "response");
                 using (Stream stream = GetStreamForApiRequest(response.GetResponseStream()))
                 {
                     using (var buffer = new BufferedStream(stream))

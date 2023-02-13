@@ -205,6 +205,34 @@ namespace TumblThree.Applications.Crawler
             return incompleteCrawl;
         }
 
+        private new bool HandleUnauthorizedWebException(WebException webException)
+        {
+            var resp = (HttpWebResponse)webException?.Response;
+            if (resp == null || resp.StatusCode != HttpStatusCode.Unauthorized)
+            {
+                return false;
+            }
+
+            Logger.Error("Auth error: {0}", webException.Message);
+            ShellService.ShowError(webException, "Auth error: {0}", webException.Message);
+            return true;
+        }
+
+        private void LogCookies(HttpWebRequest request, string type)
+        {
+            Logger.Verbose("Cookies {0}", type);
+            Logger.Verbose(" main");
+            foreach (Cookie cookie in request.CookieContainer.GetCookies(new Uri("https://www.tumblr.com/")))
+            {
+                Logger.Verbose("  {0}: {1}", cookie.Name, cookie.Value);
+            }
+            Logger.Verbose(" blog");
+            foreach (Cookie cookie in request.CookieContainer.GetCookies(new Uri("https://" + Blog.Name.Replace("+", "-") + ".tumblr.com")))
+            {
+                Logger.Verbose("  {0}: {1}", cookie.Name, cookie.Value);
+            }
+        }
+
         private async Task CrawlPageAsync(int pageNumber)
         {
             try
@@ -215,7 +243,8 @@ namespace TumblThree.Applications.Crawler
             }
             catch (WebException webException)
             {
-                if (HandleLimitExceededWebException(webException))
+                if (HandleLimitExceededWebException(webException) ||
+                    HandleUnauthorizedWebException(webException))
                 {
                     incompleteCrawl = true;
                 }
@@ -237,6 +266,7 @@ namespace TumblThree.Applications.Crawler
 
         private async Task<ulong> GetHighestPostIdAsync()
         {
+            ulong lastId = Blog.LastId;
             try
             {
                 return await GetHighestPostIdCoreAsync();
@@ -245,16 +275,17 @@ namespace TumblThree.Applications.Crawler
             {
                 if (webException.Status == WebExceptionStatus.RequestCanceled)
                 {
-                    return 0;
+                    return lastId;
                 }
 
                 HandleLimitExceededWebException(webException);
-                return 0;
+                HandleUnauthorizedWebException(webException);
+                return lastId;
             }
             catch (TimeoutException timeoutException)
             {
                 HandleTimeoutException(timeoutException, Resources.Crawling);
-                return 0;
+                return lastId;
             }
         }
 
@@ -263,7 +294,7 @@ namespace TumblThree.Applications.Crawler
             string document = await GetSvcPageAsync("1", "0");
             var response = ConvertJsonToClass<TumblrJson>(document);
 
-            Post post = response.Response.Posts.FirstOrDefault(x => !x.IsPinned);
+            Post post = response.Response?.Posts?.FirstOrDefault(x => !x.IsPinned);
             if (DateTime.TryParse(post?.Date, out var latestPost)) Blog.LatestPost = latestPost;
             _ = ulong.TryParse(Blog.Title = post?.Id, out var highestId);
             return highestId;
@@ -336,17 +367,29 @@ namespace TumblThree.Applications.Crawler
         protected virtual async Task<string> RequestDataAsync(string limit, string offset)
         {
             var requestRegistration = new CancellationTokenRegistration();
+            HttpWebRequest request = null;
             try
             {
                 string url = @"https://www.tumblr.com/svc/indash_blog?tumblelog_name_or_id=" + Blog.Name +
                              @"&post_id=&limit=" + limit + "&offset=" + offset + "&should_bypass_safemode=true";
                 string referer = @"https://www.tumblr.com/dashboard/blog/" + Blog.Name;
                 var headers = new Dictionary<string, string> { { "X-tumblr-form-key", tumblrKey } };
-                HttpWebRequest request = WebRequestFactory.CreateGetXhrRequest(url, referer, headers);
+                request = WebRequestFactory.CreateGetXhrRequest(url, referer, headers);
                 CookieService.GetUriCookie(request.CookieContainer, new Uri("https://www.tumblr.com/"));
                 CookieService.GetUriCookie(request.CookieContainer, new Uri("https://" + Blog.Name.Replace("+", "-") + ".tumblr.com"));
                 requestRegistration = Ct.Register(() => request.Abort());
-                return await WebRequestFactory.ReadRequestToEndAsync(request, true);
+                LogCookies(request, "request");
+                string response = await WebRequestFactory.ReadRequestToEndAsync(request, true);
+                return response;
+            }
+            catch (WebException ex)
+            {
+                var resp = (HttpWebResponse)ex?.Response;
+                if (resp?.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    LogCookies(request, "error");
+                }
+                throw;
             }
             finally
             {
