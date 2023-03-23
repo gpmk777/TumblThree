@@ -150,7 +150,8 @@ namespace TumblThree.Applications.Controllers
             QueueController.Initialize();
             DetailsController.Initialize();
             CrawlerController.Initialize();
-            _cookieService.SetUriCookie(_cookieList);
+            _cookieService.SetUriCookie(CleanOldTumblrCookies(_cookieList));
+            //_cookieService.SetUriCookie(_cookieList);
         }
 
         public async void Run()
@@ -474,6 +475,15 @@ namespace TumblThree.Applications.Controllers
                 CultureInfo.CurrentCulture = ci;
                 CultureInfo.CurrentUICulture = ci;
             }
+        }
+
+        private static List<Cookie> CleanOldTumblrCookies(List<Cookie> cookies)
+        {
+            if (cookies.Exists(x => x.Name == "sid" && x.Domain == "www.tumblr.com"))
+            {
+                cookies = cookies.Where(x => x.Domain != "www.tumblr.com").ToList();
+            }
+            return cookies;
         }
     }
 }
