@@ -390,7 +390,7 @@ namespace TumblThree.Applications.Crawler
             }
             var tags = GetTags(post);
             return BuildFileNameCore(url, GetBlogName(), post.dtActive.Value, UnixTimestamp(post), index, type, GetPostId(post),
-                tags, "", GetTitle(post), reblogName, reblogId);
+                tags, "", GetTitle(post), reblogName, "", reblogId);
         }
 
         private static string RemoveHtmlFromString(string text)
@@ -407,153 +407,17 @@ namespace TumblThree.Applications.Crawler
             var title = "";
             if (post.bPostTypeIx.Equals(PostType.Photo) || post.bPostTypeIx.Equals(PostType.Video) || post.bPostTypeIx.Equals(PostType.Audio))
             {
-                title = post.Parts.FirstOrDefault(p => p.bPartTypeIx == PostType.Comment)?.Medias?[0]?.szBody ?? "";
+                title = post.Parts.Where(p => p.bPartTypeIx == PostType.Comment).OrderBy(o => o.nPartIz).FirstOrDefault()?.Medias?[0]?.szBody ?? "";
                 title = RemoveHtmlFromString(title);
             }
             return title;
         }
 
-        protected static string FileName(string url)
+        private static void AddDownloadedMedia(string url, string filename, Post post)
         {
-            return url.Split('/').Last();
-        }
-
-        private static string Sanitize(string filename)
-        {
-            var invalids = System.IO.Path.GetInvalidFileNameChars();
-            return string.Join("-", filename.Split(invalids, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
-        }
-
-        private static string ReplaceCI(string input, string search, string replacement)
-        {
-            string result = Regex.Replace(
-                input,
-                Regex.Escape(search),
-                replacement.Replace("$", "$$"),
-                RegexOptions.IgnoreCase
-            );
-            return result;
-        }
-
-        private static bool ContainsCI(string input, string search)
-        {
-            return input.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1305:Specify IFormatProvider", Justification = "<Pending>")]
-        private string BuildFileNameCore(string url, string blogName, DateTime date, int timestamp, int index, string type, string id, List<string> tags, string slug, string title, string rebloggedFromName, string reblog_key)
-        {
-            /*
-             * Replaced are:
-             *  %f  original filename (default)
-                %b  blog name
-                %d  post date (yyyyMMdd)
-                %e  post date and time (yyyyMMddHHmmss)
-                %g  post date in GMT (yyyyMMdd)
-                %h  post date and time in GMT (yyyyMMddHHmmss)
-                %u  post timestamp (number)
-                %o  blog name of reblog origin
-                %p  post title (shorted if needed…)
-                %i  post id
-                %n  image index (of photo sets)
-                %t  for all tags (cute+cats,big+dogs)
-                %r  for reblog ("" / "reblog")
-                %s  slug (last part of a post's url)
-                %k  reblog-key
-               Tokens to make filenames unique:
-                %x  "_{number}" ({number}: 2..n)
-                %y  " ({number})" ({number}: 2..n)
-             */
-            string filename = Blog.FilenameTemplate;
-
-            filename += Path.GetExtension(FileName(url));
-            if (ContainsCI(filename, "%f")) filename = ReplaceCI(filename, "%f", Path.GetFileNameWithoutExtension(FileName(url)));
-            if (ContainsCI(filename, "%d")) filename = ReplaceCI(filename, "%d", date.ToString("yyyyMMdd"));
-            if (ContainsCI(filename, "%e")) filename = ReplaceCI(filename, "%e", date.ToString("yyyyMMddHHmmss"));
-            if (ContainsCI(filename, "%g")) filename = ReplaceCI(filename, "%g", date.ToUniversalTime().ToString("yyyyMMdd"));
-            if (ContainsCI(filename, "%h")) filename = ReplaceCI(filename, "%h", date.ToUniversalTime().ToString("yyyyMMddHHmmss"));
-            if (ContainsCI(filename, "%u")) filename = ReplaceCI(filename, "%u", timestamp.ToString());
-            if (ContainsCI(filename, "%b")) filename = ReplaceCI(filename, "%b", blogName);
-            if (ContainsCI(filename, "%i"))
-            {
-                if (type == "photo" && Blog.GroupPhotoSets && index != -1) id = $"{id}_{index}";
-                filename = ReplaceCI(filename, "%i", id);
-            }
-            else if (type == "photo" && Blog.GroupPhotoSets && index != -1)
-            {
-                filename = $"{id}_{index}_{filename}";
-            }
-            if (ContainsCI(filename, "%n"))
-            {
-                if (type != "photo" || index == -1)
-                {
-                    string charBefore = "";
-                    string charAfter = "";
-                    if (filename.IndexOf("%n", StringComparison.OrdinalIgnoreCase) > 0)
-                        charBefore = filename.Substring(filename.IndexOf("%n", StringComparison.OrdinalIgnoreCase) - 1, 1);
-                    if (filename.IndexOf("%n", StringComparison.OrdinalIgnoreCase) < filename.Length - 2)
-                        charAfter = filename.Substring(filename.IndexOf("%n", StringComparison.OrdinalIgnoreCase) + 2, 1);
-                    if (charBefore == charAfter)
-                        filename = filename.Remove(filename.IndexOf("%n", StringComparison.OrdinalIgnoreCase) - 1, 1);
-                    filename = ReplaceCI(filename, "%n", "");
-                }
-                else
-                {
-                    filename = ReplaceCI(filename, "%n", index.ToString());
-                }
-            }
-            if (ContainsCI(filename, "%t")) filename = ReplaceCI(filename, "%t", string.Join(",", tags).Replace(" ", "+"));
-            if (ContainsCI(filename, "%r"))
-            {
-                if (rebloggedFromName.Length == 0 && filename.IndexOf("%r", StringComparison.OrdinalIgnoreCase) > 0 &&
-                    filename.IndexOf("%r", StringComparison.OrdinalIgnoreCase) < filename.Length - 2 &&
-                    filename.Substring(filename.IndexOf("%r", StringComparison.OrdinalIgnoreCase) - 1, 1) == filename.Substring(filename.IndexOf("%r", StringComparison.OrdinalIgnoreCase) + 2, 1))
-                {
-                    filename = filename.Remove(filename.IndexOf("%r", StringComparison.OrdinalIgnoreCase), 3);
-                }
-                filename = ReplaceCI(filename, "%r", (rebloggedFromName.Length == 0 ? "" : "reblog"));
-            }
-            if (ContainsCI(filename, "%o"))
-            {
-                filename = ReplaceCI(filename, "%o", rebloggedFromName);
-            }
-            if (ContainsCI(filename, "%s")) filename = ReplaceCI(filename, "%s", slug);
-            if (ContainsCI(filename, "%k")) filename = ReplaceCI(filename, "%k", reblog_key);
-            int neededChars = 0;
-            if (ContainsCI(filename, "%x"))
-            {
-                neededChars = 6;
-                Downloader.AppendTemplate = "_<0>";
-                filename = ReplaceCI(filename, "%x", "");
-            }
-            if (ContainsCI(filename, "%y"))
-            {
-                neededChars = 8;
-                Downloader.AppendTemplate = " (<0>)";
-                filename = ReplaceCI(filename, "%y", "");
-            }
-            if (ContainsCI(filename, "%p"))
-            {
-                string _title = title;
-                if (!ShellService.IsLongPathSupported)
-                {
-                    string filepath = Path.Combine(Blog.DownloadLocation(), filename);
-                    // 260 (max path minus NULL) - current filename length + 2 chars (%p) - chars for numbering
-                    int charactersLeft = 259 - filepath.Length + 2 - neededChars;
-                    if (charactersLeft < 0) throw new PathTooLongException($"{Blog.Name}: filename for post id {id} is too long");
-                    if (charactersLeft < _title.Length) _title = _title.Substring(0, charactersLeft - 1) + "…";
-                }
-                filename = ReplaceCI(filename, "%p", _title);
-            }
-            else if (!ShellService.IsLongPathSupported)
-            {
-                string filepath = Path.Combine(Blog.DownloadLocation(), filename);
-                // 260 (max path minus NULL) - current filename length - chars for numbering
-                int charactersLeft = 259 - filepath.Length - neededChars;
-                if (charactersLeft < 0) throw new PathTooLongException($"{Blog.Name}: filename for post id {id} is too long");
-            }
-
-            return Sanitize(filename);
+            if (post == null) throw new ArgumentNullException(nameof(post));
+            post.DownloadedFilenames.Add(filename);
+            post.DownloadedUrls.Add(url);
         }
 
         private void AddToJsonQueue(CrawlerData<DataModels.NewTumbl.Post> addToList)
@@ -811,6 +675,7 @@ namespace TumblThree.Applications.Crawler
 
                 var index = photoCount > 1 ? counter++ : -1;
                 var filename = BuildFileName(imageUrl, post, "photo", index);
+                AddDownloadedMedia(imageUrl, filename, post);
                 AddToDownloadList(new PhotoPost(imageUrl, null, GetPostId(part), UnixTimestamp(post).ToString(), filename));
             }
             if (firstImageUrl != null)
@@ -844,6 +709,7 @@ namespace TumblThree.Applications.Crawler
                 if (firstImageUrl == null) { firstImageUrl = imageUrl; }
 
                 var filename = BuildFileName(imageUrl, post, "photo", -1);
+                AddDownloadedMedia(imageUrl, filename, post);
                 AddToDownloadList(new PhotoPost(imageUrl, null, GetPostId(post), UnixTimestamp(post).ToString(), filename));
             }
             if (firstImageUrl != null)
@@ -861,6 +727,7 @@ namespace TumblThree.Applications.Crawler
                 if (newTumblParser.IsNewTumblUrl(imageUrl)) { continue; }
                 if (firstImageUrl == null) { firstImageUrl = imageUrl; }
 
+                AddDownloadedMedia(imageUrl, FileName(imageUrl), post);
                 AddToDownloadList(new PhotoPost(imageUrl, null, GetPostId(post), UnixTimestamp(post).ToString(), FileName(imageUrl)));
             }
             if (firstImageUrl != null)
@@ -883,7 +750,9 @@ namespace TumblThree.Applications.Crawler
                 if (Blog.DownloadVideo)
                 {
                     if (firstVideoUrl == null) firstVideoUrl = videoUrl;
-                    AddToDownloadList(new VideoPost(videoUrl, GetPostId(part), UnixTimestamp(post).ToString(), BuildFileName(videoUrl, post, "video", -1)));
+                    var filename = BuildFileName(videoUrl, post, "video", -1);
+                    AddDownloadedMedia(videoUrl, filename, post);
+                    AddToDownloadList(new VideoPost(videoUrl, GetPostId(part), UnixTimestamp(post).ToString(), filename));
                 }
                 else
                 {
@@ -896,6 +765,7 @@ namespace TumblThree.Applications.Crawler
                 {
                     var filename = FileName(imageUrl);
                     filename = BuildFileName(filename, post, "photo", -1);
+                    AddDownloadedMedia(imageUrl, filename, post);
                     AddToDownloadList(new PhotoPost(imageUrl, null, GetPostId(part, true), UnixTimestamp(post).ToString(), filename));
                     if (!Blog.DownloadVideo)
                     {
@@ -933,6 +803,7 @@ namespace TumblThree.Applications.Crawler
                 if (firstAudioUrl == null) firstAudioUrl = audioUrl;
 
                 var filename = BuildFileName(audioUrl, post, "audio", -1);
+                AddDownloadedMedia(audioUrl, filename, post);
                 AddToDownloadList(new AudioPost(audioUrl, GetPostId(part), UnixTimestamp(post).ToString(), filename));
             }
             if (firstAudioUrl != null)

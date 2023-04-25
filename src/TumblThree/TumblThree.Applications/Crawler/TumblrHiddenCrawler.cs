@@ -296,7 +296,7 @@ namespace TumblThree.Applications.Crawler
 
             Post post = response.Response?.Posts?.FirstOrDefault(x => !x.IsPinned);
             if (DateTime.TryParse(post?.Date, out var latestPost)) Blog.LatestPost = latestPost;
-            _ = ulong.TryParse(Blog.Title = post?.Id, out var highestId);
+            _ = ulong.TryParse(post?.Id, out var highestId);
             return highestId;
         }
 
