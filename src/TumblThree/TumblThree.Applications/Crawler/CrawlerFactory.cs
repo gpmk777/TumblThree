@@ -28,15 +28,19 @@ namespace TumblThree.Applications.Crawler
         private readonly IShellService shellService;
         private readonly ISharedCookieService cookieService;
         private readonly AppSettings settings;
+        private readonly IEnvironmentService environmentService;
+        private readonly ILoginService loginService;
 
         [ImportingConstructor]
         internal CrawlerFactory(ICrawlerService crawlerService, IManagerService managerService, ShellService shellService,
-            ISharedCookieService cookieService)
+            ISharedCookieService cookieService, IEnvironmentService environmentService, ILoginService loginService)
         {
             this.crawlerService = crawlerService;
             this.managerService = managerService;
             this.shellService = shellService;
             this.cookieService = cookieService;
+            this.environmentService = environmentService;
+            this.loginService = loginService;
             settings = shellService.Settings;
         }
 
@@ -80,7 +84,7 @@ namespace TumblThree.Applications.Crawler
                         cookieService, GetTumblrDownloader(progress, blog, files, postQueue, pt, ct),
                         GetJsonDownloader(jsonSvcQueue, blog, pt, ct), GetTumblrSvcJsonToTextParser(blog), GetTumblrParser(),
                         imgurParser, gfycatParser, GetWebmshareParser(), GetUguuParser(),
-                        GetCatBoxParser(), postQueue, jsonSvcQueue, blog, progress, pt, ct);
+                        GetCatBoxParser(), postQueue, jsonSvcQueue, blog, progress, pt, ct, environmentService, loginService);
                 case BlogTypes.tlb:
                     IPostQueue<CrawlerData<DataModels.TumblrSearchJson.Data>> jsonDataQueue = GetJsonQueue<DataModels.TumblrSearchJson.Data>();
                     return new TumblrLikedByCrawler(shellService, crawlerService, webRequestFactory,

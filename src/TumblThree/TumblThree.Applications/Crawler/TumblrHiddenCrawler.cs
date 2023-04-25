@@ -7,7 +7,8 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using TumblThree.Applications.DataModels;
 using TumblThree.Applications.DataModels.CrawlerData;
 using TumblThree.Applications.DataModels.TumblrPosts;
@@ -29,6 +30,8 @@ namespace TumblThree.Applications.Crawler
         private readonly IDownloader downloader;
         private readonly ITumblrToTextParser<Post> tumblrJsonParser;
         private readonly IPostQueue<CrawlerData<Post>> jsonQueue;
+        private readonly IEnvironmentService environmentService;
+        private readonly ILoginService loginService;
         private readonly IList<string> existingCrawlerData = new List<string>();
         private readonly object existingCrawlerDataLock = new object();
 
@@ -45,7 +48,8 @@ namespace TumblThree.Applications.Crawler
             ISharedCookieService cookieService, IDownloader downloader, ICrawlerDataDownloader crawlerDataDownloader,
             ITumblrToTextParser<Post> tumblrJsonParser, ITumblrParser tumblrParser, IImgurParser imgurParser,
             IGfycatParser gfycatParser, IWebmshareParser webmshareParser, IUguuParser uguuParser, ICatBoxParser catboxParser,
-            IPostQueue<AbstractPost> postQueue, IPostQueue<CrawlerData<Post>> jsonQueue, IBlog blog, IProgress<DownloadProgress> progress, PauseToken pt, CancellationToken ct)
+            IPostQueue<AbstractPost> postQueue, IPostQueue<CrawlerData<Post>> jsonQueue, IBlog blog, IProgress<DownloadProgress> progress, PauseToken pt, CancellationToken ct,
+            IEnvironmentService environmentService, ILoginService loginService)
             : base(shellService, crawlerService, webRequestFactory, cookieService, tumblrParser, imgurParser, gfycatParser,
                 webmshareParser, uguuParser, catboxParser, postQueue, blog, downloader, crawlerDataDownloader, progress, pt,
                 ct)
@@ -53,6 +57,8 @@ namespace TumblThree.Applications.Crawler
             this.downloader = downloader;
             this.tumblrJsonParser = tumblrJsonParser;
             this.jsonQueue = jsonQueue;
+            this.environmentService = environmentService;
+            this.loginService = loginService;
         }
 
         public override async Task IsBlogOnlineAsync()
@@ -214,7 +220,7 @@ namespace TumblThree.Applications.Crawler
             }
 
             Logger.Error("Auth error: {0}", webException.Message);
-            ShellService.ShowError(webException, "Auth error: {0}", webException.Message);
+            ShellService.ShowError(webException, "Auth error (trying to continue): {0}", webException.Message);
             return true;
         }
 
@@ -237,7 +243,23 @@ namespace TumblThree.Applications.Crawler
         {
             try
             {
-                string document = await GetSvcPageAsync(Blog.PageSize.ToString(), (Blog.PageSize * pageNumber).ToString());
+                string document = null;
+                try
+                {
+                    document = await GetSvcPageAsync(Blog.PageSize.ToString(), (Blog.PageSize * pageNumber).ToString());
+                }
+                catch (WebException webEx)
+                {
+                    if (HandleUnauthorizedWebException(webEx))
+                    {
+                        await FetchCookiesAgainAsync();
+                        document = await GetSvcPageAsync(Blog.PageSize.ToString(), (Blog.PageSize * pageNumber).ToString());
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
                 var response = ConvertJsonToClass<TumblrJson>(document);
                 await AddUrlsToDownloadListAsync(response, pageNumber);
             }
@@ -264,6 +286,35 @@ namespace TumblThree.Applications.Crawler
             }
         }
 
+        private static CookieCollection GetCookies(List<CoreWebView2Cookie> cookies)
+        {
+            CookieCollection cookieCollection = new CookieCollection();
+            foreach (var cookie in cookies)
+            {
+                var transferCookie = new System.Net.Cookie(cookie.Name, WebUtility.UrlEncode(cookie.Value), cookie.Path, cookie.Domain);
+                transferCookie.Expires = cookie.Expires;
+                transferCookie.HttpOnly = cookie.IsHttpOnly;
+                transferCookie.Secure = cookie.IsSecure;
+                cookieCollection.Add(transferCookie);
+            }
+            return cookieCollection;
+        }
+
+        private async Task<bool> FetchCookiesAgainAsync()
+        {
+            var appSettingsPath = Path.GetFullPath(Path.Combine(environmentService.AppSettingsPath, ".."));
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, appSettingsPath);
+            using (WebView2 browser = new WebView2())
+            {
+                await browser.EnsureCoreWebView2Async(env);
+                var cookieManager = browser.CoreWebView2.CookieManager;
+                var cookies = await cookieManager.GetCookiesAsync("https://www.tumblr.com/");
+                CookieCollection cookieCollection = GetCookies(cookies);
+                loginService.AddCookies(cookieCollection);
+            }
+            return true;
+        }
+
         private async Task<ulong> GetHighestPostIdAsync()
         {
             ulong lastId = Blog.LastId;
@@ -279,7 +330,10 @@ namespace TumblThree.Applications.Crawler
                 }
 
                 HandleLimitExceededWebException(webException);
-                HandleUnauthorizedWebException(webException);
+                if (HandleUnauthorizedWebException(webException))
+                {
+                    await FetchCookiesAgainAsync();
+                }
                 return lastId;
             }
             catch (TimeoutException timeoutException)
