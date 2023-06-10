@@ -91,7 +91,7 @@ namespace TumblThree.Applications.Crawler
                         cookieService, GetTumblrDownloader(progress, blog, files, postQueue, pt, ct), GetJsonDownloader(jsonDataQueue, blog, pt, ct),
                         GetTumblrApiJsonToTextParser(blog), GetTumblrParser(),
                         imgurParser, gfycatParser, GetWebmshareParser(), GetUguuParser(),
-                        GetCatBoxParser(), postQueue, jsonDataQueue, blog, progress, pt, ct);
+                        GetCatBoxParser(), postQueue, jsonDataQueue, blog, progress, pt, ct, environmentService, loginService);
                 case BlogTypes.tumblrsearch:
                     IPostQueue<CrawlerData<string>> jsonQueue = GetJsonQueue<string>();
                     return new TumblrSearchCrawler(shellService, crawlerService, webRequestFactory,
